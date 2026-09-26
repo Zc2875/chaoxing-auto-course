@@ -90,13 +90,11 @@ QUIZ_DUMP_ALWAYS = True        # 一检测到弹题就把现场写到 调试-弹
 # 超星的做法是视频 iframe 播完给父页面发一条 postMessage(JOB_FINISH_INFO),
 # 父页面收到才给任务点加上 ans-job-finished —— 这条消息一旦丢了, 就成了
 # "视频播完了、弹题也过了, 但任务点显示未完成"。所以播完不能马上走:
-#   1) 播完先只等 JOB_FINISH_WAIT_FIRST 秒, 看 ans-job-finished 出来没有;
-#   2) 没出来就把结尾重放一遍(逼播放器重新上报), 有次数上限;
-#   3) 还不出来就如实报出来, 并把现场写到 调试-任务点未完成.txt
+#   1) 播完只等 JOB_FINISH_WAIT_FIRST 秒, 看 ans-job-finished 出来没有;
+#   2) 没出来就不折腾了, 直接从头把这一段重播一遍(重播也是真实播放);
+#   3) 重播完还是没有, 才如实报出来, 并把现场写到 调试-任务点未完成.txt
 JOB_FINISH_CHECK = True       # 播完后核对任务点到底有没有被标成完成
-JOB_FINISH_WAIT = 8           # 补播之后最多等多少秒让平台把任务点标成完成
-JOB_FINISH_WAIT_FIRST = 2     # 播完头一遍只等这几秒: 平台没标上就直接补播, 不干等
-JOB_FINISH_RETRY = 2          # 一直标不上时, 最多把结尾重放几遍逼它重新上报
+JOB_FINISH_WAIT_FIRST = 2     # 播完只等这几秒, 平台没标上就直接从头重播, 不干等
 JOB_TAIL_WAIT = 8             # 停在最后一秒时, 最多等多少秒等它发出"看完"通知
 
 # 播放中提前收尾: 超星有时在这段视频还没播到结尾时, 就已经把它的任务点标成"已完成"
@@ -1782,7 +1780,7 @@ class ChaoxingRunner:
                 raw = -1
             if raw >= 0:
                 idx = raw
-        limit = JOB_FINISH_WAIT if timeout is None else float(timeout)
+        limit = JOB_FINISH_WAIT_FIRST if timeout is None else float(timeout)
         deadline = time.monotonic() + max(0.5, limit)
         waited = False
         while True:
@@ -1811,13 +1809,6 @@ class ChaoxingRunner:
                 tips.extend(str(x) for x in got)
         return tips[:4]
 
-    def _replay_tail(self, video) -> bool:
-        '''把结尾再放一遍, 让播放器重新发一次"看完了"的上报'''
-        if not self._seek_end(video):
-            return False
-        time.sleep(max(6.0, float(REPORT_WAIT) + 3.0))
-        return True
-
     def _dump_job_diagnostics(self, video, job_frame, before, job_now) -> None:
         '''"视频播完了但任务点没完成"时把现场导出来, 定位到底是哪种原因'''
         path = Path(__file__).resolve().parent / '调试-任务点未完成.txt'
@@ -1842,14 +1833,20 @@ class ChaoxingRunner:
         except Exception as exc:
             log.warning('写任务点调试文件失败: %s', exc)
 
-    def _ensure_job_finished(self, video, job_frame, before, job_now) -> bool:
+    def _ensure_job_finished(self, video, job_frame, before, job_now,
+                             final: bool = False) -> bool:
         '''视频播完后, 确认平台真的把这一段的任务点标成了完成
 
         超星的链路是: 播放器播完 -> 给父页面发一条 JOB_FINISH_INFO ->
         父页面给任务点加 ans-job-finished。消息丢了或父页面没来得及处理,
-        就成了"视频播完了、弹题也过了, 任务点却显示未完成"。所以这里
-        先等, 等不到就把结尾重放一遍逼它重新上报, 再等不到就如实报出来。
-        播完头一遍只等 JOB_FINISH_WAIT_FIRST 秒, 没标上就直接补播, 不干等。
+        就成了"视频播完了、弹题也过了, 任务点却显示未完成"。
+
+        这里不再自己想办法逼平台补一次上报(把结尾重放一遍那种做法平台并不
+        认): 播完只等 JOB_FINISH_WAIT_FIRST 秒, 没标上就返回 False, 由上层
+        把整段从头重播一遍 —— 那才是平台认的"又看了一遍"。
+
+        final=True 表示这次已经是重播的那一遍了, 没有下一次: 再标不上就记一
+        笔, 并把现场写到 调试-任务点未完成.txt。
         '''
         if not JOB_FINISH_CHECK or job_frame is None:
             return True
@@ -1867,18 +1864,12 @@ class ChaoxingRunner:
             self.job_missed += 1
             self._dump_job_diagnostics(video, job_frame, before, job_now)
             return True
-        for round_no in range(1, max(1, int(JOB_FINISH_RETRY)) + 1):
-            log.warning('这一段的任务点还没被标成完成, 第 %d 次把结尾重放一遍,'
-                        ' 让播放器重新上报……', round_no)
-            if not self._replay_tail(video):
-                break
-            ok, why = self._wait_job_finished(job_frame, before, job_now)
-            if ok:
-                log.info(why or '任务点已标记完成')
-                return True
-        log.warning('这一段视频播完了, 平台却一直没把任务点标成完成')
-        self.job_missed += 1
-        self._dump_job_diagnostics(video, job_frame, before, job_now)
+        if final:
+            log.warning('这一段重播完了, 平台还是没把任务点标成完成')
+            self.job_missed += 1
+            self._dump_job_diagnostics(video, job_frame, before, job_now)
+            return False
+        log.warning('这一段的任务点还没被标成完成, 直接从头重播一遍……')
         return False
 
     def _video_key(self, video):
@@ -2285,7 +2276,7 @@ class ChaoxingRunner:
 
         重播直接拿同一个定位器再播一遍(它是按序号取的, 还指着同一段): 不切卡片、
         不重建 DOM —— 播放器还在原地, 从头再放一遍就能重新触发一次"看完了"上报,
-        而且 5 倍速下几秒钟就刷完了(这段内容第一遍已经正常倍速真看过)。
+        而且重播本身就是真实播放(默认仍按原倍速), 不做额外加速。
 
         seen_to_end=True 表示这一段之前就放到过结尾了(内容真看过, 只是平台没标
         任务点): 那第一遍就直接用 RETRY_RATE 补播, 不用再慢慢走一遍原倍速。
@@ -2439,7 +2430,8 @@ class ChaoxingRunner:
             return False
         log.info("视频播完, 等待播放器上报进度(%d 秒)……", REPORT_WAIT)
         time.sleep(REPORT_WAIT)
-        if not self._ensure_job_finished(video, job_frame, job_before, job_now):
+        if not self._ensure_job_finished(video, job_frame, job_before, job_now,
+                                         final=retry):
             log.warning('这一段按"没播完"处理, 交给上层重来一次')
             return False
         return True
@@ -3606,9 +3598,8 @@ def main() -> None:
                  QUIZ_SCAN_INTERVAL)
     if JOB_FINISH_CHECK:
         log.info('任务点核对: 每个视频播完后都会盯着 ans-job-finished, 确认平台'
-                 '把它标成"已完成"; 播完先只看 %.0f 秒, 没标上就直接补播(不干等),'
-                 ' 最多补 %d 遍, 再不行就记进 调试-任务点未完成.txt',
-                 JOB_FINISH_WAIT_FIRST, JOB_FINISH_RETRY)
+                 '把它标成"已完成"; 播完只看 %.0f 秒, 没标上就直接从头重播一遍,'
+                 ' 重播还标不上才记进 调试-任务点未完成.txt', JOB_FINISH_WAIT_FIRST)
     if JOB_FINISH_CHECK and JOB_EARLY_EXIT:
         log.info('提前收尾: 播放中每 %d 秒核对一次, 一旦这个视频的任务点已经标成'
                  ' "已完成"就直接切下一个视频, 不再等它播到结尾', JOB_EARLY_INTERVAL)
