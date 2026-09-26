@@ -1,0 +1,26 @@
+# ---- 运行期生成, 千万别提交 ----
+# 登录态(里面是你的学习通会话 Cookie)
+.chaoxing_profile/
+
+# 你自己的课程网址(带个人课程参数)
+course_url.txt
+
+# 脚本自己写出来的日志 / 现场快照
+运行日志-超星刷课.txt
+调试-*.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 打包产物
+*.zip
