@@ -40,6 +40,7 @@ python chaoxing_auto_course.py --url "你的课程章节页网址"
 ## 注意事项
 - 超星有行为检测，倍速建议不超过 2，尽量别切走或最小化窗口。
 - 学习检测、章节测验、讨论、文档等非视频任务点不在处理范围内。
+- 启动就报 `TargetClosedError`：配置目录 `.chaoxing_profile` 已经有浏览器在跑了（上次没关干净，或双击了两次 `run.bat`）。关掉所有 Edge/Chrome 窗口，或删掉 `.chaoxing_profile` 再跑。
 - 运行日志与 `调试-*.txt` 已加入 `.gitignore`，排错时看它们。
 - 仅供学习交流，请勿商用；后果自负。
 

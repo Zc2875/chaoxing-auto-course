@@ -36,6 +36,7 @@ import threading
 import time
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
@@ -3514,6 +3515,49 @@ def _launch_args() -> list:
     return args
 
 
+BROWSER_BUSY_HINT = (
+    '浏览器没能启动。最常见的原因是: 已经有一个浏览器在用同一个配置目录',
+    '(脚本目录下的 .chaoxing_profile) 跑着了 —— Edge/Chrome 会把新窗口并进',
+    '那个已有会话, 然后自己立刻退出, Playwright 收到的就是',
+    '"Target page, context or browser has been closed"。',
+    '  1) 先把所有 Edge / Chrome 窗口全部关掉(任务管理器里看看有没有残留的',
+    '     msedge.exe / chrome.exe), 再重新运行;',
+    '  2) 还是不行就删掉脚本目录下的 .chaoxing_profile 文件夹再运行 ——',
+    '     只丢登录态, 重新登录一次就行;',
+    '  3) 也别同时双击两次 run.bat: 两个进程抢同一个配置目录必然这样。',
+    '如果想确认是不是这个原因, 看日志里浏览器自己打印的那一行是不是',
+    '"正在现有的浏览器会话中打开。"',
+)
+
+
+def _launch_context(p, channel, headless):
+    '''启动浏览器; 起不来时给一句人话, 而不是甩一整页 Playwright 堆栈'''
+    kwargs = dict(
+        user_data_dir=str(PROFILE_DIR),
+        headless=headless,
+        channel=None if channel in (None, 'chromium') else channel,
+        no_viewport=True,
+        locale='zh-CN',
+        timezone_id='Asia/Shanghai',
+        args=_launch_args(),
+    )
+    for attempt in (1, 2):
+        try:
+            return p.chromium.launch_persistent_context(**kwargs)
+        except PlaywrightError as exc:
+            first = str(exc).strip().splitlines()
+            first = first[0] if first else exc.__class__.__name__
+            if attempt == 2:
+                log.error('浏览器还是没能启动: %s', first)
+                break
+            log.warning('浏览器第一次没启动起来: %s', first)
+            log.warning('可能是上一次的浏览器还没退干净, 等 5 秒再试一次……')
+            time.sleep(5)
+    for line in BROWSER_BUSY_HINT:
+        log.error('%s', line)
+    return None
+
+
 def pick_course_url(cli_url) -> str:
     '''课程网址: --url > 脚本里的 COURSE_URL > 同目录的 course_url.txt'''
     if cli_url and str(cli_url).strip():
@@ -3622,15 +3666,9 @@ def main() -> None:
                     ' 后果请自行权衡', args.rate)
 
     with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR),
-            headless=args.headless,
-            channel=None if args.channel in (None, 'chromium') else args.channel,
-            no_viewport=True,
-            locale='zh-CN',
-            timezone_id='Asia/Shanghai',
-            args=_launch_args(),
-        )
+        context = _launch_context(p, args.channel, args.headless)
+        if context is None:
+            return
         if KEEP_ALIVE:
             try:
                 context.add_init_script(_KEEP_ALIVE_BOOT)
@@ -3682,7 +3720,11 @@ def main() -> None:
         finally:
             log.info('浏览器将在 5 秒后关闭……')
             time.sleep(5)
-            context.close()
+            try:
+                context.close()
+            except Exception as exc:
+                log.warning('关闭浏览器时出了点小问题(不影响已经做好的任务点): %s',
+                            exc)
 
 
 if __name__ == '__main__':
