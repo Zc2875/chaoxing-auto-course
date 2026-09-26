@@ -51,7 +51,6 @@ COURSE_URL = ''
 COURSE_URL_FILE = Path(__file__).resolve().parent / 'course_url.txt'
 
 PLAYBACK_RATE = 2.0           # 视频播放倍速
-REPORT_WAIT = 4               # 视频播完后多等几秒, 让播放器上报最终进度
 DWELL_BETWEEN_UNITS = (2, 6)  # 两个任务点之间的随机停留(秒)
 DWELL_AFTER_OPEN = (3, 8)     # 打开任务点后开始操作前的随机等待(秒)
 STALL_SECONDS = 25            # 视频进度连续停滞多久视为异常(秒)
@@ -2428,8 +2427,6 @@ class ChaoxingRunner:
         if not finished:
             log.warning("这一段没播完(播放器被顶掉或卡死), 标记为未完成")
             return False
-        log.info("视频播完, 等待播放器上报进度(%d 秒)……", REPORT_WAIT)
-        time.sleep(REPORT_WAIT)
         if not self._ensure_job_finished(video, job_frame, job_before, job_now,
                                          final=retry):
             log.warning('这一段按"没播完"处理, 交给上层重来一次')
