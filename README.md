@@ -23,7 +23,7 @@ playwright install chromium          # 用 --channel chrome/msedge 可跳过
 python chaoxing_auto_course.py --url "你的课程章节页网址"
 ```
 课程网址三选一：`--url` / 脚本同目录 `course_url.txt`（推荐，已 gitignore）/ 改脚本顶部 `COURSE_URL`（默认留空）。
-首次运行在弹出的窗口里登录学习通，之后自动开始。
+首次运行在弹出的窗口里登录学习通——**必须登在这个窗口里**，脚本用的是独立的 `.chaoxing_profile`，你平时浏览器里的登录态它看不到。之后自动开始。
 
 ## 常用参数
 | 参数 | 说明 |
@@ -41,6 +41,7 @@ python chaoxing_auto_course.py --url "你的课程章节页网址"
 - 超星有行为检测，倍速建议不超过 2，尽量别切走或最小化窗口。
 - 学习检测、章节测验、讨论、文档等非视频任务点不在处理范围内。
 - 启动就报 `TargetClosedError`：配置目录 `.chaoxing_profile` 已经有浏览器在跑了（上次没关干净，或双击了两次 `run.bat`）。关掉所有 Edge/Chrome 窗口，或删掉 `.chaoxing_profile` 再跑。
+- 卡在"等待登录中 / 没解析到课程章节列表"：前者是登录没登在脚本弹出的窗口里，后者多半是 `course_url.txt` 里的网址不是课程章节页（或已过期）。卡满 3 分钟脚本会自动导出 `调试-页面结构.txt`。
 - 运行日志与 `调试-*.txt` 已加入 `.gitignore`，排错时看它们。
 - 仅供学习交流，请勿商用；后果自负。
 

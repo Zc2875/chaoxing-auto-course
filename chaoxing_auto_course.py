@@ -1331,6 +1331,14 @@ class ChaoxingRunner:
                 pass
         return False
 
+    def _title_note(self) -> str:
+        '''日志里带上当前标签页的标题, 一眼就能看出卡在哪一页'''
+        try:
+            ttl = (self.page.title() or '').strip()
+        except Exception:
+            ttl = ''
+        return (" 标题: %s" % ttl) if ttl else ''
+
     def _start_enter_watcher(self) -> None:
         '''后台等一次回车, 用户按下就强制跳过登录检测'''
         if getattr(self, "_enter_thread", None) is not None:
@@ -1344,6 +1352,7 @@ class ChaoxingRunner:
         self._start_enter_watcher()
         last_note = None
         last_note_at = 0.0
+        dumped = False
         while True:
             for page in self._alive_pages():
                 if self._is_login_url(page.url):
@@ -1367,15 +1376,30 @@ class ChaoxingRunner:
             if self._is_login_url(url):
                 note = ("等待登录中, 请在弹出的浏览器窗口里登录学习通(扫码或密码)。"
                         " 当前网址: %s" % url)
+                stuck_hint = ('还停在登录页。如果你确认已经登进去了, 那多半是登在了'
+                              '别的浏览器窗口里 —— 必须登在脚本自己弹出的那个窗口;')
             else:
                 note = ("已经不在登录页了, 但没解析到课程章节列表。"
-                        " 当前网址: %s" % url)
+                        " 当前网址: %s%s" % (url, self._title_note()))
+                stuck_hint = ('登录页已经过了, 但这一页上找不到课程章节树。最常见的原因是'
+                              ' course_url.txt 里的网址不是"课程章节页"—— 应该是 '
+                              'studentstudy?chapterId=... 那一串;另外带 cpi/enc/openc 的'
+                              '网址会过期, 过期了要回到浏览器里重新复制一次;')
             if note != last_note or now - last_note_at > 30:
                 log.info(note)
                 last_note = note
                 last_note_at = now
 
             elapsed = now - started
+            if not dumped and elapsed > 180:
+                dumped = True
+                log.warning("等了 %.0f 秒还没认出课程页面: %s", elapsed, stuck_hint)
+                log.warning("已把这一页的结构写到 调试-页面结构.txt, 发出来就能定位;"
+                            " 也可以直接在控制台按一次回车, 强制跳过登录检测往下跑")
+                try:
+                    self.dump_page_diagnostics()
+                except Exception as exc:
+                    log.warning("导出页面结构失败: %s", exc)
             if headless and elapsed > 120:
                 raise SystemExit("无头模式下 120 秒内未完成登录。"
                                  "请先不带 --headless 运行一次完成登录。")
