@@ -79,42 +79,41 @@ QUIZ_SOLVER_FILE = '刷学习检测.py'  # 作答逻辑在同目录的这个脚�
 # 想恢复"每步都打"就把 CONSOLE_QUIET 改成 False; 想多留几类行就往 CONSOLE_KEEP 里加词。
 CONSOLE_QUIET = True
 CONSOLE_KEEP = ('本章', '处理结束', '开始处理', '任务点已标记完成', '视频开始播放',
-                '滚到底', '滑块', '学习检测', '弹题已作答', '登录', '风控', '====')
+                '滚到底', '跳到底', '滑块', '长图', '阅读器', '学习检测', '弹题已作答',
+                '登录', '风控', '====')
 
 # "安全知识"这类卡片里可能不是视频, 而是一张长图 / 一份 PPT(超星用 pdf 模块套
 # 云盘阅读器渲染, 一页一页竖着排)。它同样是任务点, 得把内容滚到底才算看完。
 #
-# 两个坑都踩过了, 记在这儿:
+# 三个坑都踩过了, 记在这儿:
 #   1) 滚错容器 —— 学习页最外面的章节目录 div#coursetree 又高又能滚(一万多像素),
 #      不限定范围的话一抓就抓到它, 结果只在右侧目录里上下跑、卡片纹丝不动。所以
 #      这里只认内容区(knowledge/cards)自己和它下面的子 frame(内容区 -> pdf 模块
 #      -> 云盘阅读器), 主页面一律不算。
-#   2) 一次跳到最底不算数 —— 阅读器的进度是按**滚动事件累计**的, 直接 scrollTop 顶
-#      到底平台只当滚过一格。所以这里跟人手滚一样: 先按住右边那条滑块拖到底,
-#      拖不动就一把跳到底, 再不跟才试一发一发真滚轮; 每层都有上限, 绝不无限滚。
+#   2) 扫得太早 —— 切卡片会把内容区整个重建, 阅读器要好几秒才出来; 早先只扫一眼,
+#      扫不到就"跳过", 于是日志里老是"没找到能滚的长图"。现在先等 DOC_WAIT_READY 秒。
+#   3) "滚到底了平台却不认" —— 阅读器的进度是自己听**真实滚动事件**累计的, 直接改
+#      scrollTop 顶到底它不一定认。所以按"最像人手"的顺序来: 先按住右边那条滑块拖到
+#      底 -> 真滚轮 + PageDown/End -> 一把跳到底并补发真实滚动事件(确认真到底了还是
+#      没动静, 再替阅读器把它自己那条"我看完了"的消息补发一次)。
 #
-#      而且"滚到底"这件事**不用等平台标任务点** —— 用户实测: 有的"安全知识"
-#      卡片压根没有任务点, 等下去纯属白等。现在的规矩是: 只要认出这张卡片要滚,
-#      就干脆利落地拖到底, 等几秒够平台记账, 立刻切下一张。
+#      每一招之后都回读平台的任务点(ans-job-finished): 标上了才算真的完了, 立刻切
+#      下一张; 本来就没有任务点的卡片, 只要真滚到底就算过。绝不多等、绝不无限重试。
 HANDLE_DOC_CARDS = True       # 顺手把这种"长图/PPT"卡片滚到底, 当看完
+DOC_WAIT_READY = 25           # 切到卡片后最多等这么多秒, 等阅读器把内容渲染出来
+DOC_WAIT_STEP = 1.0           # 等的过程中隔多久看一眼(秒)
 DOC_SCROLL_STEP = 700         # 备用(现在长图直接"一把跳到底", 用不到格数了)
-DOC_SCROLL_WAIT = 0.12        # 备用: 每格之间停多久(秒)
-DOC_SCROLL_MAX = 180          # 备用: 以前一格一格挪的上限, 现在不格了
 DOC_SCROLL_TRIES = 2          # 一层不行就换下一层, 最多试几层
-DOC_CHECK_EVERY = 6           # 走真滚轮那条路时, 隔几下核对一次任务点
-DOC_FINISH_WAIT = 10          # 备用(以前滚完等平台标任务点用, 现在滚完就走)
+DOC_MARK_WAIT = 6             # 最后一招之后, 最多等几秒看平台把任务点标上没
+DOC_MARK_QUICK = 2            # 前面几招之后只看这么多秒(不行就换下一招, 不磨蹭)
+DOC_SETTLE_NOJOB = 3          # 这张卡片压根没有任务点时: 滚到底后等几秒再切下一张
 DOC_WHEEL_DELTA = 700         # 真滚轮每下多少像素
-DOC_WHEEL_MAX = 30            # 真滚轮最多发几下(只是最后的退路, 别磨蹭)
-DOC_WHEEL_WAIT = 0.12         # 每下之间停多久(秒)
-#
-# 3) 还有一条最难缠的 —— 阅读器右边那条竖滑块。用户给的截图圈的就是它: 浏览器
-#      原生的那种(带上下小三角、灰色滑块)。它既不是 DOM 也不是 JS 画出来的,
-#      querySelectorAll 一个都抓不到, 挪 scrollTop 平台也只当滚过一格。最像人的
-#      做法是按住那条滑块, 一小步一小步把它拖到底。
+DOC_WHEEL_WAIT = 0.12         # 滚轮/按键之间停多久(秒)
+DOC_REAL_INPUT = True         # 真滚轮 + PageDown/End: 阅读器只认真实的滚动事件
+DOC_POST_MSG = True           # 确认真到底了还没动静, 就替阅读器补发一次"看完了"
 DOC_SLIDER_DRAG = True        # 把阅读器右边那条滑块拖到底(最像人手, 优先用这条)
 DOC_SLIDER_STEPS = 6          # 拖的时候分几步走(几步就够, 不磨蹭: 只拖"差的那一段")
 DOC_SLIDER_WAIT = 0.02        # 每步之间停多久(秒)
-DOC_SLIDER_SETTLE = 3         # 拖到底之后再等几秒(够平台记账就行), 然后立刻切下一张
 DOC_SLIDER_TRIES = 4          # 最多拖几条滑块(每条最多拖两回), 绝不无限拖
 DOC_SLIDER_HOVER = 0.08       # 按下去之前先悬停多久(秒)
 DOC_WHEEL_HOVER = 0.12        # 发滚轮之前先悬停多久(秒)
@@ -1297,11 +1296,18 @@ _DOC_SCROLL_STEP_JS = """
   if (cfg.toEnd) {
     if (sh > ch) el.scrollTop = sh;
     if (sw > cw) el.scrollLeft = sw;
+    if (el === document.documentElement || el === document.body) {
+      try { window.scrollTo(0, sh > ch ? sh : document.body.scrollHeight); } catch (e) {}
+    }
   } else {
     if (sh > ch) el.scrollTop = Math.min(el.scrollTop + step, sh);
     if (sw > cw) el.scrollLeft = Math.min(el.scrollLeft + step, sw);
   }
   el.dispatchEvent(new Event("scroll", {bubbles: true}));
+  if (el === document.documentElement || el === document.body) {
+    try { window.dispatchEvent(new Event("scroll")); } catch (e) {}
+    try { document.dispatchEvent(new Event("scroll")); } catch (e) {}
+  }
   const r = el.getBoundingClientRect();
   el.dispatchEvent(new WheelEvent("wheel", {
     deltaY: cfg.toEnd ? 6000 : step, deltaMode: 0,
@@ -1325,22 +1331,6 @@ _DOC_SCROLL_POS_JS = """
   const cw = el.clientWidth || 0;
   return {top: el.scrollTop, left: el.scrollLeft, sh: sh, ch: ch, sw: sw, cw: cw,
           atEnd: (el.scrollTop >= sh - ch - 2) && (el.scrollLeft >= sw - cw - 2)};
-}
-"""
-
-# 阅读器右边那条竖滑块的坐标怎么算: 浏览器原生滚动条(带上下小三角的那种)既不
-# 是 DOM 元素, 也不是 JS 画出来的, querySelectorAll 一个都抓不到 —— 但按几何
-# 算得出来: 视口宽度减掉文档可用宽度就是滚动条宽度, 滑块就贴在内容右缘那条缝里。
-# 这里只按 frame 自己的视口坐标算, 换算到主页面坐标的活交给 Python(缩放、窗口
-# 大小一变坐标全变, 所以绝不写死)。
-_DOC_RECT_JS = """
-(arg) => {
-  const el = document.querySelector('[data-cx-scroll="' + (arg && arg.sel) + '"]');
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  return {x: r.left + r.width / 2, y: r.top + r.height / 2,
-          w: Math.round(r.width), h: Math.round(r.height),
-          inner: [window.innerWidth || 0, window.innerHeight || 0]};
 }
 """
 
@@ -2028,6 +2018,44 @@ class ChaoxingRunner:
                 pass
         return out
 
+    def _doc_live_frame(self, frame):
+        '''切卡片会把内容区整个重建, 手里这个 frame 可能已经废了 —— 废了就重新找'''
+        try:
+            frame.evaluate('() => 1')
+            return frame
+        except Exception:
+            pass
+        try:
+            again = self.find_content_frame()
+        except Exception:
+            again = None
+        return again or frame
+
+    def _doc_poke(self, frame) -> None:
+        '''等阅读器的时候轻轻戳一下卡片: 超星的卡片要拿到焦点才开始加载内容'''
+        try:
+            frame.evaluate("() => { const el = document.getElementById('cardFocus');"
+                           " if (el) el.focus(); return 1; }")
+        except Exception:
+            pass
+
+    def _doc_frames_brief(self, frame) -> str:
+        '''各层 frame 的网址 + 能滚多少像素(排错用, 就一行)'''
+        bits = []
+        for fr in self._doc_frames(frame):
+            url = (getattr(fr, 'url', '') or '')[:56]
+            gap = 0
+            try:
+                info = fr.evaluate(_DOC_SCROLL_FIND_JS)
+                if isinstance(info, dict):
+                    cands = info.get('cands') or []
+                    if cands:
+                        gap = int(cands[0].get('gap') or 0)
+            except Exception:
+                gap = -1
+            bits.append('%s(可滚 %s)' % (url or 'about:blank', gap))
+        return ' | '.join(bits)
+
     def _doc_scroll_cands(self, frame) -> list:
         '''在各层里找"能滚的", 按可滚距离从大到小排; 主页面(章节目录)不参与'''
         got = []
@@ -2059,14 +2087,35 @@ class ChaoxingRunner:
             return None
         return got if isinstance(got, dict) else None
 
-    def _doc_settle(self, title: str, how: str = '滚到底了') -> bool:
-        '''到底之后统一收尾: 等几秒够平台记账就走, **不等任务点**
+    def _doc_wait_cands(self, frame, title: str):
+        '''等阅读器把内容渲染出来再滚
 
-        用户实测: 有的"安全知识"卡片压根没有任务点, 在这儿等平台标完成纯属白等。'''
-        log.info('卡片「%s」%s, 等 %.0f 秒就切下一张(不等任务点标没标上)',
-                 title, how, float(DOC_SLIDER_SETTLE))
-        time.sleep(max(0.0, float(DOC_SLIDER_SETTLE)))
-        return True
+        切卡片会把内容区整个重建, pdf 模块 + 云盘阅读器要好几秒才出来。早先这里只
+        扫一眼, 扫不到就"这张卡片里没有视频, 也没找到能滚的长图, 跳过" —— 卡片其实
+        是有内容的, 只是还没加载出来。现在最多等 DOC_WAIT_READY 秒, 每秒看一眼。'''
+        start = time.monotonic()
+        deadline = start + max(0.0, float(DOC_WAIT_READY))
+        told = 0
+        poked = False
+        while True:
+            here = self._doc_live_frame(frame)
+            cands = self._doc_scroll_cands(here)
+            spent = int(time.monotonic() - start)
+            if cands:
+                if spent >= 3:
+                    log.info('卡片「%s」等了 %d 秒, 阅读器总算出来了, 这就滚到底', title, spent)
+                return here, cands
+            if time.monotonic() >= deadline:
+                log.info('卡片「%s」等了 %d 秒也没见到能滚的内容(%s)',
+                         title, spent, self._doc_frames_brief(here))
+                return here, []
+            if spent >= 6 and not poked:
+                poked = True
+                self._doc_poke(here)
+            if spent and spent % 10 == 0 and spent != told:
+                told = spent
+                log.info('卡片「%s」还在等阅读器加载(已 %d 秒)', title, spent)
+            time.sleep(max(0.05, float(DOC_WAIT_STEP)))
 
     def _doc_pos(self, cand):
         '''读一下选中的那一层现在滚到哪了(不动它); 读不到返回 None'''
@@ -2083,6 +2132,43 @@ class ChaoxingRunner:
     def _doc_at_end(pos) -> bool:
         '''这一层是不是已经滚到头了'''
         return bool(pos) and bool(pos.get('atEnd'))
+
+    @staticmethod
+    def _doc_moved(before, after) -> bool:
+        '''两次读数之间这一层动了没有'''
+        if not before or not after:
+            return False
+        if int(after.get('top') or 0) != int(before.get('top') or 0):
+            return True
+        if int(after.get('left') or 0) != int(before.get('left') or 0):
+            return True
+        return bool(after.get('atEnd')) and not bool(before.get('atEnd'))
+
+    def _doc_task_left(self, frame) -> int:
+        '''这张卡片还有几个任务点没完成; 数不出任务点(-1)说明这张卡片压根没有'''
+        try:
+            return self._attach_pending(frame)
+        except Exception:
+            return -1
+
+    def _doc_wait_marked(self, frame, title: str, no_job: bool, wait=None) -> bool:
+        '''滚完之后看一眼平台把任务点标上没 —— 这一步才是真的"做完了"
+
+        云盘阅读器滚到底会给父页面发一条"我看完了", 父页面 finishJob() 之后平台才
+        把任务点标成已完成; 落库有时要等一两秒, 所以给它 DOC_MARK_WAIT 秒。本来就
+        没有任务点的卡片(no_job): 只要真滚到底就算过, 只等 DOC_SETTLE_NOJOB 秒就切下一张。'''
+        if no_job:
+            time.sleep(max(0.0, float(DOC_SETTLE_NOJOB)))
+            return True
+        limit = float(DOC_MARK_WAIT if wait is None else wait)
+        deadline = time.monotonic() + max(0.0, limit)
+        while True:
+            if self._doc_task_left(frame) == 0:
+                log.info('卡片「%s」长图任务点已标记完成', title)
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.4)
 
     def _doc_bar_cands(self, frame) -> list:
         '''在各层里找"右边挂着那条滚动滑块"的容器, 顺带算好滑块在屏幕上的位置
@@ -2186,14 +2272,38 @@ class ChaoxingRunner:
             except Exception:
                 pass
 
-    def _doc_drag_slider(self, frame, title: str) -> bool:
+    def _doc_target_point(self, cand):
+        '''"该把鼠标放到哪": 选中那层所在 frame 在屏幕上的中心点(主页面坐标)
+
+        阅读器那一层又高又长(动辄十万像素), 它自己的"中心"早跑到屏幕外面去了, 所以
+        只按 frame 的可见矩形定位 —— 鼠标落在阅读器可见的那块区域里就管用。'''
+        fr = cand.get('frame')
+        if fr is None:
+            return None
+        try:
+            el = fr.frame_element()
+            box = el.bounding_box() if el is not None else None
+        except Exception:
+            box = None
+        if not box:
+            return None
+        try:
+            bx = float(box.get('x') or 0.0)
+            by = float(box.get('y') or 0.0)
+            bw = float(box.get('width') or 0.0)
+            bh = float(box.get('height') or 0.0)
+        except Exception:
+            return None
+        if bw < 40.0 or bh < 40.0:
+            return None
+        return (bx + bw / 2, by + bh / 2)
+
+    def _doc_drag_slider(self, frame, cand, title: str) -> bool:
         '''把阅读器右边那条竖滑块拖到底 —— 用户圈的就是这条
 
-        用户给过截图: 浏览器原生那种滚动条(上下小三角 + 灰滑块), 它既不是 DOM
-        也不是 JS 画的, 所以只能按几何算出坐标, 再用鼠标按住拖。拖到了就返回
-        True(再等 DOC_SLIDER_SETTLE 秒收工, **不等平台标任务点** —— 有的卡片压根
-        没有任务点); 拖不动 / 压根没滑块才返回 False, 让上层接着一把跳到底、再试真
-        滚轮。同一条滑块只拖一次, 绝不无限拖。'''
+        浏览器原生那种滚动条(上下小三角 + 灰滑块)既不是 DOM 也不是 JS 画的, 只能按
+        几何算出坐标, 再用鼠标按住拖。动过 / 本来就在最底就返回 True(上层接着看平台
+        任务点有没有标上); 拖不动、压根没滑块才返回 False。同一条滑块只拖一次。'''
         tried = getattr(self, '_doc_slider_tried', None)
         if tried is None:
             tried = []
@@ -2202,6 +2312,10 @@ class ChaoxingRunner:
                  if self._doc_slider_key(c) not in tried]
         if not cands:
             return False
+        if cand is not None and cand.get('frame') is not None:
+            same = [c for c in cands if c.get('frame') is cand.get('frame')]
+            if same:
+                cands = same
         tries = max(1, int(DOC_SLIDER_TRIES))
         if len(cands) == 1:
             tries = min(tries, 2)
@@ -2211,9 +2325,9 @@ class ChaoxingRunner:
                  best.get('id'), best.get('gap'), int(best.get('page_x') or 0),
                  int(best.get('page_cy') or 0), int(best.get('page_bot') or 0))
         acted = False
-        for cand in cands[:tries]:
-            tried.append(self._doc_slider_key(cand))
-            bar = cand
+        for one in cands[:tries]:
+            tried.append(self._doc_slider_key(one))
+            bar = one
             for n in range(1, 3):
                 before = self._doc_bar_pos(bar) or {}
                 if before.get('atEnd'):
@@ -2228,12 +2342,11 @@ class ChaoxingRunner:
                 if moved > 0 or after.get('atEnd'):
                     acted = True
                 if after.get('atEnd'):
-                    log.info('卡片「%s」那条滑块已经拖到最底了', title)
+                    log.info('卡片「%s」滑块已经拖到最底了', title)
                     break
                 if moved <= 0:
                     log.info('卡片「%s」这条滑块按下去纹丝不动, 换下一条试试', title)
                     break
-                # 第一回拖完滑块自己就往下走了, 再拖之前得把它现在的位置重算一遍
                 now = self._doc_slider_key(bar)
                 for again in self._doc_bar_cands(frame):
                     if self._doc_slider_key(again) == now:
@@ -2242,129 +2355,132 @@ class ChaoxingRunner:
             if acted:
                 break
         if not acted:
-            log.info('卡片「%s」那条滑块拖不动(CDP 鼠标拖原生滚动条没反应), 改用别的办法',
-                     title)
+            log.info('卡片「%s」那条滑块拖不动, 改用别的办法', title)
             return False
-        return self._doc_settle(title, '右边那条滑块拖到底了')
+        return True
 
-    def _doc_wheel_walk(self, frame, cand, title: str) -> bool:
-        '''真滚轮一发一发往下滚 —— 页面自己接管滚动的那种, 只认真滚轮
+    def _doc_real_input(self, frame, cand, title: str) -> bool:
+        '''在阅读器那块内容上发真滚轮 + PageDown/End —— 阅读器只认真实的滚动事件
 
-        人和脚本在这件事上的区别不是"滚到底", 而是**一路滚下去**: 阅读器的进度
-        是按滚动事件累计的, 一下子跳到底它只当滚过一格。所以这里一发一发来, 边滚
-        边核对任务点。'''
-        fr = cand.get('frame')
-        box = None
-        try:
-            el = fr.frame_element()
-            box = el.bounding_box() if el is not None else None
-        except Exception:
-            box = None
-        # 滚轮得发在"那块内容正中间"才管用: 先问 JS 要目标元素在自己 frame 里的
-        # 位置, 再按 frame 的缩放换算到主页面坐标; 实在拿不到才退回整块 frame 中心。
-        spot = None
-        try:
-            got = fr.evaluate(_DOC_RECT_JS, {'sel': cand.get('sel')})
-        except Exception:
-            got = None
-        if isinstance(got, dict) and box:
-            try:
-                inner = got.get('inner') or [0, 0]
-                iw = float(inner[0] or 0)
-                ih = float(inner[1] or 0)
-                bw = float(box.get('width') or 0.0)
-                bh = float(box.get('height') or 0.0)
-                if iw > 0.0 and ih > 0.0 and bw > 40.0 and bh > 40.0:
-                    spot = (float(box.get('x') or 0.0) + float(got.get('x') or 0.0) * (bw / iw),
-                            float(box.get('y') or 0.0) + float(got.get('y') or 0.0) * (bh / ih))
-            except Exception:
-                spot = None
+        阅读器的进度是自己听窗口滚动事件累计的, 脚本直接改 scrollTop 有的环境不算数;
+        真滚轮和真键盘是浏览器自己发出来的事件, 它一定认。'''
+        spot = self._doc_target_point(cand)
         if spot is None:
-            wide = float(box.get('width') or 0.0) if box else 0.0
-            tall = float(box.get('height') or 0.0) if box else 0.0
-            if wide < 60.0 or tall < 60.0:
-                log.info('卡片「%s」定位不到那块内容, 真滚轮跳过', title)
-                return False
-            spot = (float(box.get('x') or 0.0) + wide / 2,
-                    float(box.get('y') or 0.0) + tall / 2)
+            return False
         x, y = spot
-        start = self._doc_pos(cand) or {}
-        log.info('卡片「%s」先用真滚轮在那块内容上一路滚下去(最多 %d 下)',
-                 title, int(DOC_WHEEL_MAX))
+        before = self._doc_pos(cand) or {}
         try:
             self.page.mouse.move(x, y)
             time.sleep(max(0.0, float(DOC_WHEEL_HOVER)))
+            self.page.mouse.click(x, y)
         except Exception as exc:
-            log.warning('挪鼠标到内容上失败: %s', exc)
+            log.warning('卡片「%s」把鼠标放到阅读器上失败: %s', title, exc)
             return False
-        need = max(1, int(DOC_CHECK_EVERY))
-        for n in range(1, int(DOC_WHEEL_MAX) + 1):
+        acted = False
+        for delta in (int(DOC_WHEEL_DELTA), int(DOC_WHEEL_DELTA) * 3):
             try:
-                self.page.mouse.wheel(0, int(DOC_WHEEL_DELTA))
+                self.page.mouse.wheel(0, delta)
             except Exception as exc:
-                log.warning('发滚轮失败: %s', exc)
-                return False
-            if n % need == 0:
-                if not self._guard_antispider():
-                    return False
-                if self._attach_pending(frame) == 0:
-                    log.info('卡片「%s」真滚轮滚到第 %d 下, 任务点标成已完成了', title, n)
-                    return True
-                pos = self._doc_pos(cand)
-                if self._doc_at_end(pos):
-                    log.info('卡片「%s」真滚轮滚到底了(第 %d 下)', title, n)
-                    return self._doc_settle(title)
-                same = (pos and pos.get('top') == start.get('top')
-                        and pos.get('left') == start.get('left'))
-                if same and n >= 3 * need:
-                    log.info('卡片「%s」这一层不跟滚轮走, 换下一层试试', title)
-                    return False
-            time.sleep(DOC_WHEEL_WAIT)
-        log.info('卡片「%s」真滚轮发了 %d 下还没到底', title, int(DOC_WHEEL_MAX))
-        return self._doc_settle(title)
+                log.warning('卡片「%s」发滚轮失败: %s', title, exc)
+                break
+            time.sleep(max(0.0, float(DOC_WHEEL_WAIT)))
+            now = self._doc_pos(cand) or {}
+            if self._doc_moved(before, now):
+                acted = True
+            before = now
+        for key in ('PageDown', 'End'):
+            try:
+                self.page.keyboard.press(key)
+            except Exception:
+                break
+            time.sleep(max(0.0, float(DOC_WHEEL_WAIT)))
+            now = self._doc_pos(cand) or {}
+            if self._doc_moved(before, now):
+                acted = True
+            before = now
+            if self._doc_at_end(now):
+                break
+        if acted:
+            log.info('卡片「%s」真滚轮/键盘滚到底了', title)
+        return acted
 
-    def _doc_scroll_pass(self, frame, cand, title: str) -> bool:
-        '''把这一层滚到底: 先拖阅读器右边那条滑块, 再"一把跳到底", 最后才试真滚轮
+    def _doc_tell_parent(self, cand, title: str) -> None:
+        '''确实滚到底了, 就替阅读器把它自己那套"我看完了"报给父页面
 
-        三条路都是"到了就走": 滚到底等 DOC_SLIDER_SETTLE 秒就切下一张,
-        **不等平台标任务点**(有的卡片压根没有任务点)。见配置区的说明。
+        云盘阅读器的原话是: 窗口滚到底 -> parent.postMessage({isFinished: 1}) ->
+        父页面 finishJob() 把这张卡片记成"看完"。脚本发的滚动事件它不一定认, 所以
+        真到底之后补发一次(只在已经到底的前提下补, 没到底绝不会发)。'''
+        fr = cand.get('frame')
+        if fr is None:
+            return
+        try:
+            fr.evaluate('() => { try { parent.postMessage({isFinished: 1}, "*"); }'
+                        ' catch (e) {} return 1; }')
+            log.info('卡片「%s」已到底, 替阅读器把"看完了"上报一次', title)
+        except Exception as exc:
+            log.warning('卡片「%s」上报"看完了"失败: %s', title, exc)
 
-        早先这里是一格一格挪 scrollTop(每格 700px) —— 真机实测又慢(一张卡片
-        十几秒)平台又照样不认, 已经删掉, 改成一步跳到底。'''
-        if DOC_SLIDER_DRAG and self._doc_drag_slider(frame, title):
-            return True
-        before = self._doc_pos(cand) or {}
-        if before.get('atEnd'):
-            log.info('卡片「%s」这一层本来就已经到底了', title)
-            return True
+    def _doc_jump_end(self, frame, cand, title: str) -> bool:
+        '''一把跳到底(顺带补发真实滚动事件); 到底了还没动静就替阅读器上报一次'''
         got = self._doc_scroll(cand, to_end=True)
         if got is None:
             return False
-        if (got.get('top') or 0) > ((got.get('before') or {}).get('top') or 0):
-            return self._doc_settle(title, '一把跳到底(到 %s px)' % got.get('top'))
-        log.info('卡片「%s」这一层不跟 scrollTop 走, 改用真滚轮', title)
-        return self._doc_wheel_walk(frame, cand, title)
+        reached = bool(got.get('atEnd')) or self._doc_moved(got.get('before') or {}, got)
+        if not reached:
+            log.info('卡片「%s」这一层不跟 scrollTop 走', title)
+            return False
+        log.info('卡片「%s」一把跳到底了(到 %s px)', title, got.get('top'))
+        if DOC_POST_MSG and got.get('atEnd'):
+            self._doc_tell_parent(cand, title)
+        return True
 
+    def _doc_scroll_pass(self, frame, cand, title: str) -> bool:
+        '''把这一层滚到底: 拖右边那条滑块 -> 真滚轮/键盘 -> 一把跳到底
+
+        三招按"最像人手"的顺序来, 每一招之后都看一眼平台的任务点有没有标上 ——
+        标上了立刻收工; 这张卡片本来就没有任务点的, 只要真滚到底也算过。
+
+        以前是"滚过就走、不等任务点", 于是"滚到底了平台却没标上"这种情况一直没人管;
+        现在改成按任务点收尾, 但每招最多只等 DOC_MARK_QUICK / DOC_MARK_WAIT 秒。'''
+        no_job = self._doc_task_left(frame) < 0
+        if DOC_SLIDER_DRAG and self._doc_drag_slider(frame, cand, title):
+            if self._doc_wait_marked(frame, title, no_job, DOC_MARK_QUICK):
+                return True
+        if DOC_REAL_INPUT and self._doc_real_input(frame, cand, title):
+            if self._doc_wait_marked(frame, title, no_job, DOC_MARK_QUICK):
+                return True
+        if self._doc_jump_end(frame, cand, title):
+            if self._doc_wait_marked(frame, title, no_job):
+                return True
+        return False
 
     def handle_doc_card(self, frame, title: str) -> str:
         '''"安全知识"这种长图/PPT 卡片: 把内容一路滚到底, 当看完
 
-        滚到底之后**不再等平台标任务点**(有的卡片压根没有任务点), 等几秒就切下一张。
+        卡片里的内容有两种: 云盘阅读器里的 PDF/PPT, 和直接铺开的一张长图。两种都得
+        "内容区真的滚到底 + 平台收到滚动事件"才算数, 所以按这个顺序来:
+          1. 先等阅读器加载出来(切卡片会把内容区整个重建, 有时要等好几秒);
+          2. 拖右边那条滑块 -> 真滚轮/键盘 -> 一把跳到底, 每招之后读平台任务点;
+          3. 都没有动静才写 调试-长图未完成.txt, 并把这章标成失败等回头重来一遍。
 
         返回 'done' 滚到底了 / 'already' 任务点本来就是完成的 /
-        'none' 这张卡片里没有视频、也没找到能滚的长图 /
-        'fail' 怎么滚都没动静(现场写 调试-长图未完成.txt)
-        '''
-        if self._attach_pending(frame) == 0:
+        'none' 这张卡片里没有视频、也没找到能滚的长图(而且它压根没有任务点) /
+        'fail' 有任务点却怎么滚都没动静(现场写 调试-长图未完成.txt)'''
+        left = self._doc_task_left(frame)
+        if left == 0:
             log.info('卡片「%s」的任务点本来就已完成, 不用滚', title)
             return 'already'
-        if self._attach_pending(frame) < 0:
-            log.info('卡片「%s」数不出任务点(有的卡片压根没有), 也照样滚一遍', title)
         self._doc_slider_tried = []
-        cands = self._doc_scroll_cands(frame)
+        frame, cands = self._doc_wait_cands(frame, title)
         if not cands:
-            log.info('卡片「%s」里没有视频, 也没找到能滚的长图, 跳过', title)
-            return 'none'
+            if left < 0:
+                log.info('卡片「%s」里没有视频, 也没找到能滚的长图, 跳过', title)
+                return 'none'
+            log.warning('卡片「%s」等了 %d 秒也没等到能滚的内容, 这张卡片先跳过',
+                        title, int(DOC_WAIT_READY))
+            self.dump_doc_failure(frame, title,
+                                  '等了 %d 秒也没等到能滚的内容' % int(DOC_WAIT_READY))
+            return 'fail'
         best = cands[0]
         log.info('卡片「%s」要滚的是: %s#%s [%s] 可滚 %s px, 在 %s (另外还有 %d 层候选)',
                  title, best.get('tag'), best.get('id'), best.get('cls'),
@@ -2372,8 +2488,8 @@ class ChaoxingRunner:
         for cand in cands[:DOC_SCROLL_TRIES]:
             if self._doc_scroll_pass(frame, cand, title):
                 return 'done'
-        log.warning('卡片「%s」拖滑块 / 一把跳到底 / 真滚轮都滚不动, 这张卡片先跳过', title)
-        self.dump_doc_failure(frame, title, '拖滑块 / 一把跳到底 / 真滚轮都滚不动')
+        log.warning('卡片「%s」拖滑块 / 真滚轮键盘 / 一把跳到底都滚不动, 这张卡片先跳过', title)
+        self.dump_doc_failure(frame, title, '拖滑块 / 真滚轮键盘 / 一把跳到底都滚不动')
         return 'fail'
 
     def dump_doc_failure(self, frame, title: str, why: str) -> None:
@@ -4478,10 +4594,10 @@ def main() -> None:
     else:
         log.info('学习检测卡片: 不处理(--no-quiz-card), 请自己手动做')
     if HANDLE_DOC_CARDS:
-        log.info('长图/PPT 卡片: "安全知识"里没有视频的那种, 先拖阅读器右边那条滑块,'
-                 '拖不动就一把跳到底(只滚内容区自己, 绝不碰右侧章节目录); 到了等 %.0f 秒'
-                 '就切下一张, 不等平台标任务点; 三种办法都不管用才写 调试-长图未完成.txt',
-                 DOC_SLIDER_SETTLE)
+        log.info('长图/PPT 卡片: "安全知识"里没有视频的那种, 先等阅读器加载出来(最多 %.0f 秒),'
+                 ' 再拖右边那条滑块 -> 真滚轮/键盘 -> 一把跳到底(只滚内容区自己, 绝不碰'
+                 '右侧章节目录); 每招之后都看一眼任务点标上没(最多等 %.0f 秒), 标上就切'
+                 '下一张; 三种办法都不管用才写 调试-长图未完成.txt', DOC_WAIT_READY, DOC_MARK_WAIT)
     else:
         log.info('长图/PPT 卡片: 不处理(--no-doc-card), 请自己手动滚到最底')
     log.info('风控保护: 弹出验证页(9010)立刻停手, 等你在浏览器里手动过验证,'
