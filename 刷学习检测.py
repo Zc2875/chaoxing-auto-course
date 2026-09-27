@@ -44,23 +44,43 @@ li 自己的 onclick="addMultipleChoice(this)"。
     python 刷学习检测.py --dry-run        # 只把题目结构读出来, 不提交
 
 默认连"做过但没满分"的也重做一遍, 只做没做过的加 --only-new。
+
+ 也可以不单独跑: chaoxing_auto_course.py 刷视频时会顺手把"学习检测"卡片做掉,
+ 那边调用的就是这里的 handle_work_card() —— 一份作答逻辑, 两边共用。
 '''
 
 import argparse
 import importlib.util
+import logging
 import sys
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-MAIN = HERE / 'chaoxing_auto_course.py'
-if not MAIN.exists():
-    sys.exit('没找到 chaoxing_auto_course.py, 请把这个脚本和它放在同一个目录')
+MAIN_FILE = 'chaoxing_auto_course.py'
+MAIN = HERE / MAIN_FILE
 
-spec = importlib.util.spec_from_file_location('cx', MAIN)
-cx = importlib.util.module_from_spec(spec)
-sys.modules['cx'] = cx
-spec.loader.exec_module(cx)
+# 和主脚本共用同一个 logger: 单独跑时由本脚本 setup_logging, 被主脚本调用时
+# 主脚本的 handler 已经配好了, 日志照样落在 运行日志-超星刷课.txt 里。
+log = logging.getLogger('chaoxing')
+
+_MAIN_CACHE = None
+
+
+def load_main():
+    '''按需加载同目录的主脚本(复用它的浏览器/profile/章节列表), 加载不了直接退出
+
+    故意做成懒加载: 主脚本反过来要用本模块的作答逻辑, 模块级就去加载主脚本
+    会让主脚本被整个再执行一遍。'''
+    global _MAIN_CACHE
+    if _MAIN_CACHE is None:
+        if not MAIN.exists():
+            sys.exit('没找到 %s, 请把这个脚本和它放在同一个目录' % MAIN_FILE)
+        spec = importlib.util.spec_from_file_location('cx', MAIN)
+        _MAIN_CACHE = importlib.util.module_from_spec(spec)
+        sys.modules['cx'] = _MAIN_CACHE
+        spec.loader.exec_module(_MAIN_CACHE)
+    return _MAIN_CACHE
 
 CARD_NAME = '学习检测'
 TEXT_JS = '() => (document.body ? document.body.innerText : "")'
@@ -263,7 +283,7 @@ def _eval(frame, js, arg=None):
             return frame.evaluate(js)
         return frame.evaluate(js, arg)
     except Exception as exc:
-        cx.log.warning('执行 JS 失败: %s', exc)
+        log.warning('执行 JS 失败: %s', exc)
         return None
 
 
@@ -361,9 +381,9 @@ def dump_frame(frame, name: str) -> None:
     try:
         path.write_text('网址: %s\n\n%s' % (frame.url or '', text),
                         encoding='utf-8')
-        cx.log.info('    当前页面结构已写入: %s', path)
+        log.info('    当前页面结构已写入: %s', path)
     except Exception as exc:
-        cx.log.warning('    写 %s 失败: %s', path, exc)
+        log.warning('    写 %s 失败: %s', path, exc)
 
 
 def read_questions(frame) -> list:
@@ -396,7 +416,7 @@ def submit_round(page, frame, plan: dict, label: str, prev_times=None):
     绝不在"没选上/被弹窗拦下/平台没记账"的时候继续往下走。'''
     kind = frame_kind(frame)
     if kind != 'answer':
-        cx.log.warning('  %s 当前不是答题页(%s), 不提交', label, kind)
+        log.warning('  %s 当前不是答题页(%s), 不提交', label, kind)
         return None
     wrote = set_selection(frame, plan)
     empty = [x for x in wrote if x.split('=')[-1] in ('', '?')]
@@ -404,47 +424,47 @@ def submit_round(page, frame, plan: dict, label: str, prev_times=None):
         time.sleep(1.0)
         wrote = set_selection(frame, plan)
         empty = [x for x in wrote if x.split('=')[-1] in ('', '?')]
-    cx.log.info('  %s 勾选: %s', label, ' / '.join(str(x) for x in wrote))
+    log.info('  %s 勾选: %s', label, ' / '.join(str(x) for x in wrote))
     if empty:
-        cx.log.warning('  %s 这些题没选上(%s), 交空卷没意义, 先停下',
+        log.warning('  %s 这些题没选上(%s), 交空卷没意义, 先停下',
                        label, ' / '.join(empty))
         dump_frame(frame, '没选上')
         return None
     time.sleep(0.8)
     hit = _eval(frame, CLICK_SUBMIT_JS)
     if not hit:
-        cx.log.warning('  %s 没找到提交按钮', label)
+        log.warning('  %s 没找到提交按钮', label)
         return None
     time.sleep(1.2)
     dlg = confirm_any(page, frame, SUBMIT_DIALOG_OK, SUBMIT_DIALOG_BAD)
     if dlg.get('action') == 'cancel':
-        cx.log.warning('  平台拦下了这次提交(弹窗: %s), 这一段先不做', dlg.get('text'))
+        log.warning('  平台拦下了这次提交(弹窗: %s), 这一段先不做', dlg.get('text'))
         return None
     if dlg.get('text'):
-        cx.log.info('  确认弹窗: %s  [%s]', dlg.get('label') or '(没弹)',
+        log.info('  确认弹窗: %s  [%s]', dlg.get('label') or '(没弹)',
                     dlg.get('text'))
     else:
-        cx.log.info('  确认弹窗: %s', dlg.get('label') or '(没弹)')
+        log.info('  确认弹窗: %s', dlg.get('label') or '(没弹)')
     graded = wait_for_kind(page, 'graded', 60.0)
     if graded is None:
-        cx.log.warning('  %s 提交后没等到结果页, 这一段先不做', label)
+        log.warning('  %s 提交后没等到结果页, 这一段先不做', label)
         dump_frame(frame, '提交后没结果页')
         return None
     time.sleep(1.0)
     marks = read_marks(graded)
     times = read_result(graded).get('times')
     if not marks:
-        cx.log.warning('  %s 结果页上一道题都没读到, 先停下', label)
+        log.warning('  %s 结果页上一道题都没读到, 先停下', label)
         dump_frame(graded, '结果页没题目')
         return None
     if prev_times is not None and times is not None:
         if times < prev_times:
             # 有的卷子重做之后会重新计数, 这不算异常
-            cx.log.info('  作答次数从 %s 变成 %s(重做后重新计数), 继续', prev_times, times)
+            log.info('  作答次数从 %s 变成 %s(重做后重新计数), 继续', prev_times, times)
         elif times == prev_times:
-            cx.log.warning('  平台没记这一次作答(还是第 %s 次), 这一段先不做', times)
+            log.warning('  平台没记这一次作答(还是第 %s 次), 这一段先不做', times)
             return None
-    cx.log.info('  判分: %s', ' / '.join(
+    log.info('  判分: %s', ' / '.join(
         '%s=%s(%s)' % (i + 1, m.get('mark') or '?', m.get('score') or '')
         for i, m in enumerate(marks)))
     return marks, graded, times
@@ -455,26 +475,26 @@ def redo(page, frame):
     for attempt in range(2):
         hit = _eval(frame, CLICK_REDO_JS)
         if not hit:
-            cx.log.warning('没找到"重做"按钮')
+            log.warning('没找到"重做"按钮')
             dump_frame(frame, '没找到重做按钮')
             return None
-        cx.log.info('点重做: %s', hit)
+        log.info('点重做: %s', hit)
         time.sleep(1.5)
         dlg = confirm_any(page, frame, REDO_DIALOG_OK)
         if dlg.get('action') == 'cancel':
-            cx.log.warning('  重做被拦下(弹窗: %s)', dlg.get('text'))
+            log.warning('  重做被拦下(弹窗: %s)', dlg.get('text'))
             return None
-        cx.log.info('  确认重做: %s', dlg.get('label') or '(没弹)')
+        log.info('  确认重做: %s', dlg.get('label') or '(没弹)')
         new_frame = wait_for_kind(page, 'answer', 30.0)
         if new_frame is not None:
-            cx.log.info('  回到答题页: %s', (new_frame.url or '')[:90])
+            log.info('  回到答题页: %s', (new_frame.url or '')[:90])
             return new_frame
-        cx.log.info('  这次重做没回到答题页, 再来一次')
+        log.info('  这次重做没回到答题页, 再来一次')
         fr2, _kind = find_work_frame(page, 3.0)
         if fr2 is None:
             break
         frame = fr2
-    cx.log.warning('  重做没成功, 这一段先算了')
+    log.warning('  重做没成功, 这一段先算了')
     dump_frame(frame, '重做失败')
     return None
 
@@ -482,17 +502,17 @@ def redo(page, frame):
 def solve_work(page, frame) -> bool:
     qs = read_questions(frame)
     if not qs:
-        cx.log.warning('读不到题目结构')
+        log.warning('读不到题目结构')
         dump_frame(frame, '读不到题目')
         return False
     for i, q in enumerate(qs, 1):
-        cx.log.info('第 %d 题: qid=%s 题型=%s 选项=%s', i, q.get('qid'),
+        log.info('第 %d 题: qid=%s 题型=%s 选项=%s', i, q.get('qid'),
                     TYPE_NAMES.get(str(q.get('type')), q.get('type')),
                     q.get('letters'))
     blank = [str(i) for i, q in enumerate(qs, 1)
              if not [x for x in (q.get('letters') or []) if x]]
     if blank:
-        cx.log.warning('第 %s 题不是选择题(没读到可点的选项), 脚本做不了, 跳过这一节',
+        log.warning('第 %s 题不是选择题(没读到可点的选项), 脚本做不了, 跳过这一节',
                        ' / '.join(blank))
         return False
     state = {}
@@ -538,20 +558,62 @@ def solve_work(page, frame) -> bool:
                 if probe not in st['wrong']:
                     st['wrong'].append(probe)
             else:
-                cx.log.warning('  第 %d 题的判分是 %s, 当作未知',
+                log.warning('  第 %d 题的判分是 %s, 当作未知',
                                qs.index(q) + 1, mark or '空')
         if all(st['done'] for st in state.values()):
-            cx.log.info('全部答对: %s', ' / '.join(str(m.get('score')) for m in marks))
+            log.info('全部答对: %s', ' / '.join(str(m.get('score')) for m in marks))
             return True
         if r < rounds - 1:
             new_frame = redo(page, frame)
             if new_frame is None:
-                cx.log.warning('重做失败, 这一段先算了')
+                log.warning('重做失败, 这一段先算了')
                 return False
             frame = new_frame
-    cx.log.warning('试完所有轮次还没全对; 已确认的正确项: %s',
+    log.warning('试完所有轮次还没全对; 已确认的正确项: %s',
                    {k: v['correct'] for k, v in state.items()})
     return False
+
+
+def handle_work_card(page, only_new=False, dry_run=False) -> str:
+    '''把一节「学习检测」做掉(调用方已经切到这张卡片上了)
+
+    返回 done / skip / fail / none:
+        done  做完了(或者本来就全对)
+        skip  本来就满分, 或者只做没做过的(--only-new)时跳过的
+        fail  没做成: 重做回不去、题目读不到、平台没记这一次作答
+        none  没等到答题页/结果页(卡片没加载出来)
+
+    主脚本 chaoxing_auto_course.py 刷视频时调的就是这个函数, 单独跑本脚本时
+    走的也是同一条路 —— 一份作答逻辑两边共用, 免得改了一处忘了另一处。'''
+    frame, kind = find_work_frame(page, 25.0)
+    if frame is None:
+        log.info('    没等到答题页/结果页')
+        return 'none'
+    if kind == 'graded':
+        res = read_result(frame)
+        score, full = res.get('score'), res.get('full')
+        if score is not None and full is not None and score >= full:
+            log.info('    已经满分(%s/%s), 不用做', score, full)
+            return 'skip'
+        if only_new:
+            log.info('    已经做过了(--only-new), 跳过')
+            return 'skip'
+        log.info('    做过但没满分(成绩 %s / 满分 %s), 点重做再来', score, full)
+        frame = redo(page, frame)
+        if frame is None:
+            log.warning('    重做失败, 跳过这一节')
+            return 'fail'
+    if dry_run:
+        for i, q in enumerate(read_questions(frame), 1):
+            log.info('    第 %d 题: 题型=%s 选项=%s', i,
+                     TYPE_NAMES.get(str(q.get('type')), q.get('type')),
+                     q.get('letters'))
+        return 'skip'
+    if solve_work(page, frame):
+        log.info('    学习检测这一节做完了')
+        return 'done'
+    log.warning('    学习检测这一节没做成')
+    return 'fail'
 
 
 def main() -> None:
@@ -571,6 +633,7 @@ def main() -> None:
     ap.add_argument('--headless', action='store_true')
     ap.add_argument('--keep-open', type=float, default=5.0)
     args = ap.parse_args()
+    cx = load_main()
 
     cx.setup_logging()
     url = cx.pick_course_url(args.url)
@@ -584,12 +647,12 @@ def main() -> None:
         page = context.pages[0] if context.pages else context.new_page()
         runner = cx.ChaoxingRunner(page, cx.PLAYBACK_RATE)
         try:
-            cx.log.info('正在打开课程页……')
+            log.info('正在打开课程页……')
             page.goto(url, wait_until='domcontentloaded', timeout=90000)
             runner.wait_until_logged_in(args.headless)
             units = runner.collect_units_wait(90.0)
             if not units:
-                cx.log.error('没解析到章节')
+                log.error('没解析到章节')
                 return
             if args.chapter:
                 wanted = [u for u in units if args.chapter in (u.get('text') or '')]
@@ -599,7 +662,7 @@ def main() -> None:
             else:
                 wanted = [u for u in units if int(u.get('unfinish') or 0) > 0]
                 wanted.sort(key=lambda u: -int(u.get('unfinish') or 0))
-            cx.log.info('共 %d 章节, 待查 %d 个', len(units), len(wanted))
+            log.info('共 %d 章节, 待查 %d 个', len(units), len(wanted))
             tried = 0
             for unit in wanted:
                 if (args.limit and done >= args.limit) or \
@@ -618,50 +681,30 @@ def main() -> None:
                         break
                 if card is None:
                     continue
-                cx.log.info('[%d] 章节「%s」-> 学习检测', tried, text)
+                log.info('[%d] 章节「%s」-> 学习检测', tried, text)
                 runner.switch_card(card['index'])
                 time.sleep(2.5)
-                frame, kind = find_work_frame(page, 25.0)
-                if frame is None:
-                    cx.log.info('    没等到答题页/结果页, 换下一节')
-                    continue
-                if kind == 'graded':
-                    res = read_result(frame)
-                    score, full = res.get('score'), res.get('full')
-                    if score is not None and full is not None and score >= full:
-                        cx.log.info('    已经满分(%s/%s), 不用做', score, full)
-                        skipped += 1
-                        continue
-                    if args.only_new:
-                        cx.log.info('    已经做过了(--only-new), 跳过')
-                        continue
-                    cx.log.info('    做过但没满分(成绩 %s / 满分 %s), 点重做再来',
-                                score, full)
-                    frame = redo(page, frame)
-                    if frame is None:
-                        cx.log.warning('    重做失败, 换下一节')
-                        continue
-                if args.dry_run:
-                    for i, q in enumerate(read_questions(frame), 1):
-                        cx.log.info('    第 %d 题: 题型=%s 选项=%s', i,
-                                    TYPE_NAMES.get(str(q.get('type')), q.get('type')),
-                                    q.get('letters'))
-                    continue
-                if solve_work(page, frame):
+                got = handle_work_card(page, only_new=args.only_new,
+                                       dry_run=args.dry_run)
+                if got == 'done':
                     done += 1
-                    cx.log.info('这一节完成 (%d/%d)', done, args.limit)
+                    log.info('这一节完成 (%d/%d)', done, args.limit)
+                elif got == 'skip':
+                    skipped += 1
+                elif got == 'none':
+                    log.info('    换下一节')
                 else:
                     failed += 1
-                    cx.log.warning('这一节没搞定, 换下一节')
-            cx.log.info('=' * 56)
-            cx.log.info('结束: 完成 %d 节 | 本来就满分跳过 %d 节 | 没搞定 %d 节',
+                    log.warning('这一节没搞定, 换下一节')
+            log.info('=' * 56)
+            log.info('结束: 完成 %d 节 | 本来就满分跳过 %d 节 | 没搞定 %d 节',
                         done, skipped, failed)
             if args.keep_open > 0:
                 time.sleep(args.keep_open)
         except KeyboardInterrupt:
-            cx.log.warning('手动中断')
+            log.warning('手动中断')
         except SystemExit as exc:
-            cx.log.error('%s', exc)
+            log.error('%s', exc)
         finally:
             try:
                 context.close()
